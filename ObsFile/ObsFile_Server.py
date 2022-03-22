@@ -11,7 +11,6 @@ import logging
 from pprint import pprint
 import sys
 import argparse
-
 import cgi
 
 hostName = ""
