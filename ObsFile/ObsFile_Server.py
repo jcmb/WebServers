@@ -12,6 +12,8 @@ from pprint import pprint
 import sys
 import argparse
 import cgi
+import subprocess
+import os
 
 hostName = ""
 serverPort = 8080
@@ -88,7 +90,7 @@ class MyServer(BaseHTTPRequestHandler):
             self.wfile.write(bytes("</body></html>", "utf-8"))
 
     def do_POST(self):
-#        pprint(self.headers['content-type'])
+#        pprint(self.path)
 #        content_length = int(self.headers['Content-Length']) # <--- Gets the size of data
 
         if self.path != "/cgi-bin/T02_2_Obs" : #Only accept on the expected URL.
@@ -108,7 +110,7 @@ class MyServer(BaseHTTPRequestHandler):
             environ = {'REQUEST_METHOD':'POST',
                      'CONTENT_TYPE': self.headers['content-type'],
                      }
-            )        
+            )  
 
 #TODO This saves the file in the working directory. Need to move it. 
 #TODO Should also get a temp name, and the filename be an attribute passed.
@@ -116,11 +118,35 @@ class MyServer(BaseHTTPRequestHandler):
         out.write(fields["file"].value)
         out.close()        
         
+        
+        
         logging.info("POST request,\nPath: %s\nHeaders:\n%s\n\n",
                 str(self.path), str(self.headers))
 
-        self._set_response(200)
-        self.wfile.write("POST request for {} accepted\n".format(self.path).encode('utf-8'))
+
+        try:
+            os.remove(fields["file"].filename+".Decoded")
+        except:
+            pass
+        subprocess.run(["ObsFileConverter.exe", "-f", fields["file"].filename, "-t" , "TXT", "-q", "-o", fields["file"].filename+".txt"])
+# even though it says we can set the output file name, the txt is always .txt.
+#        print("Back from run")
+
+        if os.path.exists(fields["file"].filename+".txt"):
+#            print("File exists")
+            self.send_response(200) 
+            self.send_header("Content-type", "application/octet-stream")
+            self.send_header('Content-Disposition', 'attachment; filename="'+fields["file"].filename+".txt"+'"')
+            self.end_headers()
+            
+
+            f = open(fields["file"].filename+".txt","rb")
+            self.wfile.write(f.read())
+            f.close()            
+        else:
+            self._set_response(500)        
+            self.wfile.write("POST request for {} accepted\n Processing failed".format(self.path).encode('utf-8'))
+        
 
 
 def process_args():
@@ -150,10 +176,9 @@ def process_args():
 
 def main():
     args=process_args()
-    pprint(args)
 
     webServer = HTTPServer((args["Host"], args["Port"]), MyServer)
-    print("Server started http://%s:%s" % (hostName, serverPort))
+    sys.stdout.write("Server started http://%s:%s\n" % (hostName, serverPort))
 
     try:
         webServer.serve_forever()
@@ -161,7 +186,7 @@ def main():
         pass
 
     webServer.server_close()
-    print("Server stopped.")
+    sys.stdout.write("Server stopped.")
 
 
 if __name__ == "__main__":        
