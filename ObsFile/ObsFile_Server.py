@@ -14,6 +14,10 @@ import argparse
 import cgi
 import subprocess
 import os
+import tempfile
+from time import sleep
+import pathlib
+
 
 hostName = ""
 serverPort = 8080
@@ -53,10 +57,7 @@ def output_index_page(file):
 <select name="Type">
    <option value="TXT">Text(TXT)</option>
    <option value="DAT">Dat</option>
-   <option value="TMT">TMT</option>
-   <option value="APPLANIX">Applanix</option>
    <option value="INFO">Info</option>
-   <option value="NAVSOLN">NavSoln</option>
    <option value="KML">KML</option>
 </select></td></tr>
 </table>
@@ -111,41 +112,93 @@ class MyServer(BaseHTTPRequestHandler):
                      'CONTENT_TYPE': self.headers['content-type'],
                      }
             )  
-
-#TODO This saves the file in the working directory. Need to move it. 
-#TODO Should also get a temp name, and the filename be an attribute passed.
-        out = open(fields["file"].filename, 'wb')
-        out.write(fields["file"].value)
-        out.close()        
-        
-        
-        
+            
         logging.info("POST request,\nPath: %s\nHeaders:\n%s\n\n",
                 str(self.path), str(self.headers))
 
+        if not ("file" in fields):
+            self.send_response(400)
+            self.send_header("Content-type", "text/html")
+            self.end_headers()
+            self.wfile.write(bytes("<html><head><title>Unknown Page</title></head></html>", "utf-8"))
+            self.wfile.write(bytes("<body>", "utf-8"))
+            self.wfile.write(bytes("<H1>Error</H1>", "utf-8"))
+            self.wfile.write(bytes("<p>Request: %s</p>" % self.path, "utf-8"))
+            self.wfile.write(bytes("<p>Missing Required Parameter: %s</p>" % "file", "utf-8"))
+            self.wfile.write(bytes("</body></html>", "utf-8"))
 
-        try:
-            os.remove(fields["file"].filename+".Decoded")
-        except:
-            pass
-        subprocess.run(["ObsFileConverter.exe", "-f", fields["file"].filename, "-t" , "TXT", "-q", "-o", fields["file"].filename+".txt"])
+        if not ("Type" in fields):
+            self.send_response(400)
+            self.send_header("Content-type", "text/html")
+            self.end_headers()
+            self.wfile.write(bytes("<html><head><title>Unknown Page</title></head></html>", "utf-8"))
+            self.wfile.write(bytes("<body>", "utf-8"))
+            self.wfile.write(bytes("<H1>Error</H1>", "utf-8"))
+            self.wfile.write(bytes("<p>Request: %s</p>" % self.path, "utf-8"))
+            self.wfile.write(bytes("<p>Missing Required Parameter: %s</p>" % "Type", "utf-8"))
+            self.wfile.write(bytes("</body></html>", "utf-8"))
+
+        file_extension = pathlib.Path(fields["file"].filename).suffix   
+        temp_dir=tempfile.gettempdir()
+        out=tempfile.NamedTemporaryFile(dir=temp_dir,suffix=file_extension,delete=False)
+        # The Temp dir is forced here because the tool we run only output in the current dir
+        out.write(fields["file"].value)
+        out.close()
+
+#        try:
+#            os.remove(outname+".txt")
+#        except:
+#            pass
+
+        output_type=fields["Type"].value
+
+#        pprint(["ObsFileConverter.exe", "-f", out.name, "-t" , output_type, "-q", "-o", out.name+".txt"])    
+        subprocess.run(["ObsFileConverter.exe", "-f", out.name, "-t" , output_type, "-q", "-o", out.name+".txt"],cwd=temp_dir)
 # even though it says we can set the output file name, the txt is always .txt.
-#        print("Back from run")
 
-        if os.path.exists(fields["file"].filename+".txt"):
+
+        if output_type=="INFO" or output_type=="TXT":
+            output_extension=".txt"
+
+
+        if output_type=="INFO":
+            file_prefix="FileInfo_"
+            head_tail=os.path.split(out.name)
+            output_name=head_tail[0]+"\\FileInfo_"+head_tail[1]+".txt"
+            download_name="FileInfo_" + fields["file"].filename+".txt"
+        
+        if output_type=="TXT":
+            output_name=out.name+".txt"
+            download_name=fields["file"].filename+".txt"
+        
+        if output_type=="DAT":
+            output_name=out.name+".dat"
+            download_name=fields["file"].filename+".dat"
+        
+        if output_type=="KML":
+            output_name=out.name+".kml"
+            download_name=fields["file"].filename+".kml"
+        
+        
+        
+#        print (output_name)
+        if os.path.exists(output_name):
 #            print("File exists")
             self.send_response(200) 
             self.send_header("Content-type", "application/octet-stream")
-            self.send_header('Content-Disposition', 'attachment; filename="'+fields["file"].filename+".txt"+'"')
+            self.send_header('Content-Disposition', 'attachment; filename="'+ download_name+'"')
             self.end_headers()
             
 
-            f = open(fields["file"].filename+".txt","rb")
+            f = open(output_name,"rb")
             self.wfile.write(f.read())
-            f.close()            
+            f.close()   
+            os.remove(output_name)
         else:
             self._set_response(500)        
             self.wfile.write("POST request for {} accepted\n Processing failed".format(self.path).encode('utf-8'))
+            
+        os.remove(out.name)
         
 
 
